@@ -1,4 +1,4 @@
-> [← LangChain Basics](01-langchain-basics.md) | [↑ Index](../README.md) | [Models →](03-models.md)
+> [← LangChain Basics](01-langchain-basics.md) | [Models →](03-models.md)
 
 # LangChain Components
 

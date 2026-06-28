@@ -1,4 +1,4 @@
-> [← Output Parsers](06-output-parsers.md) | [↑ Index](../README.md) | [Runnables and LCEL →](08-runnables-and-lcel.md)
+> [← Output Parsers](06-output-parsers.md) | [Runnables and LCEL →](08-runnables-and-lcel.md)
 
 # Chains
 

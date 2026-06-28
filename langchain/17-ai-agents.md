@@ -1,4 +1,4 @@
-> [← Tool Calling](16-tool-calling.md) | [↑ Index](../README.md) | [Quick Revision →](18-quick-revision.md)
+> [← Tool Calling](16-tool-calling.md) | [Quick Revision →](18-quick-revision.md)
 
 # AI Agents
 

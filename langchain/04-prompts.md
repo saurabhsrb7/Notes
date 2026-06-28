@@ -1,4 +1,4 @@
-> [← Models](03-models.md) | [↑ Index](../README.md) | [Structured Output →](05-structured-output.md)
+> [← Models](03-models.md) | [Structured Output →](05-structured-output.md)
 
 # Prompts
 

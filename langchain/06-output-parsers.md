@@ -1,4 +1,4 @@
-> [← Structured Output](05-structured-output.md) | [↑ Index](../README.md) | [Chains →](07-chains.md)
+> [← Structured Output](05-structured-output.md) | [Chains →](07-chains.md)
 
 # Output Parsers
 

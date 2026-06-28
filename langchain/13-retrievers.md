@@ -1,4 +1,4 @@
-> [← Vector Stores](12-vector-stores.md) | [↑ Index](../README.md) | [Building a RAG App with LangChain →](14-building-a-rag-app.md)
+> [← Vector Stores](12-vector-stores.md) | [Building a RAG App with LangChain →](14-building-a-rag-app.md)
 
 # Retrievers
 

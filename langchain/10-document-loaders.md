@@ -1,4 +1,4 @@
-> [← RAG: Retrieval-Augmented Generation](09-rag-retrieval-augmented-generation.md) | [↑ Index](../README.md) | [Text Splitters →](11-text-splitters.md)
+> [← RAG: Retrieval-Augmented Generation](09-rag-retrieval-augmented-generation.md) | [Text Splitters →](11-text-splitters.md)
 
 # Document Loaders
 

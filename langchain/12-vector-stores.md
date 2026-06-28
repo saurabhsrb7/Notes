@@ -1,4 +1,4 @@
-> [← Text Splitters](11-text-splitters.md) | [↑ Index](../README.md) | [Retrievers →](13-retrievers.md)
+> [← Text Splitters](11-text-splitters.md) | [Retrievers →](13-retrievers.md)
 
 # Vector Stores
 

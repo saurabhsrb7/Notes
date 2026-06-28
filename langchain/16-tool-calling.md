@@ -1,4 +1,4 @@
-> [← Tools](15-tools.md) | [↑ Index](../README.md) | [AI Agents →](17-ai-agents.md)
+> [← Tools](15-tools.md) | [AI Agents →](17-ai-agents.md)
 
 # Tool Calling
 

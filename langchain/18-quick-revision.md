@@ -1,4 +1,4 @@
-> [← AI Agents](17-ai-agents.md) | [↑ Index](../README.md)
+> [← AI Agents](17-ai-agents.md)
 
 # Quick Revision
 

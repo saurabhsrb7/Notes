@@ -1,4 +1,4 @@
-> [← Chains](07-chains.md) | [↑ Index](../README.md) | [RAG: Retrieval-Augmented Generation →](09-rag-retrieval-augmented-generation.md)
+> [← Chains](07-chains.md) | [RAG: Retrieval-Augmented Generation →](09-rag-retrieval-augmented-generation.md)
 
 # Runnables and LCEL
 

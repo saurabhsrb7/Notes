@@ -1,8 +1,13 @@
-> [← Retrievers](13-retrievers.md) | [↑ Index](README.md) | [Tools →](15-tools.md)
+> [← Retrievers](13-retrievers.md) | [Tools →](15-tools.md)
 
 # Building a RAG App with LangChain
 
-Complete notes for building a **Retrieval-Augmented Generation (RAG)** application — from theory to a full working PDF Q&A example.
+Complete notes for building a **Retrieval-Augmented Generation (RAG)** application — from theory to two full working projects:
+
+| Project | Source | Knowledge base | Vector store |
+|---|---|---|---|
+| **Project 1** | PDF Q&A app | PDF pages | Chroma (persistent) |
+| **Project 2** | [YouTube Transcript Chatbot](youtube-chatbot/rag_using_langchain.ipynb) | YouTube captions | FAISS (in-memory) |
 
 ---
 
@@ -27,9 +32,9 @@ It combines two ideas:
 | Fixed context window | Retrieve only the most relevant chunks |
 | Cannot store all docs in weights | Store docs in a vector store |
 
-### The running example (used throughout these notes)
+### Example use cases in this guide
 
-From the basics notes — a **PDF question-answering app**:
+**Project 1 — PDF question-answering app** (from the basics notes):
 
 > **User asks:** "Explain page 5 like I am a 5-year-old."
 
@@ -48,6 +53,12 @@ To answer correctly, the app must:
 ```
 
 LangChain gives you building blocks for every step above.
+
+**Project 2 — YouTube transcript chatbot** (from [`youtube-chatbot/rag_using_langchain.ipynb`](youtube-chatbot/rag_using_langchain.ipynb)):
+
+> **User asks:** "Can you summarize the video?"
+
+Same 9-step pipeline, but step 1 loads a YouTube transcript instead of a PDF.
 
 ---
 
@@ -522,7 +533,7 @@ for chunk in rag_chain.stream("What is the main character's name?"):
 
 ---
 
-## Complete example: PDF Q&A app
+## Project 1: PDF Q&A app
 
 Full end-to-end script for the **"Explain page 5 like I am a 5-year-old"** use case.
 
@@ -686,6 +697,605 @@ LLM returns a child-friendly summary of page 5 content
 
 ---
 
+## Project 2: YouTube Transcript Chatbot
+
+Full walkthrough of the notebook [`youtube-chatbot/rag_using_langchain.ipynb`](youtube-chatbot/rag_using_langchain.ipynb).
+
+This project builds a **chatbot that answers questions about a YouTube video** using only the video's transcript. No need to watch the full video — ask questions like *"Who is Demis?"* or *"Can you summarize the video?"* and get answers grounded in the captions.
+
+### What video does the notebook use?
+
+| Field | Value |
+|---|---|
+| **Video ID** | `Gfr50f6ZBvo` |
+| **Video** | 3Blue1Brown — *But what is a GPT?* (intro to transformers / LLMs) |
+| **Transcript source** | YouTube auto-generated or manual captions via `youtube-transcript-api` |
+| **Chunks created** | ~168 chunks (with `chunk_size=1000`, `chunk_overlap=200`) |
+
+### Project structure
+
+```text
+LangChain/
+├── 14-building-a-rag-app.md          ← this guide
+└── youtube-chatbot/
+    └── rag_using_langchain.ipynb     ← step-by-step notebook
+```
+
+### Architecture
+
+Same four RAG stages as Project 1, but the **document loader** is replaced by a YouTube transcript fetcher:
+
+```text
+INDEXING TIME
+YouTube video ID -> Transcript API -> plain text -> Splitter -> Embeddings -> FAISS
+
+QUERY TIME
+Question -> Retriever (top 4 chunks) -> Prompt -> GPT-4o-mini -> Answer
+```
+
+```text
+video_id "Gfr50f6ZBvo"
+   ↓
+YouTubeTranscriptApi.fetch()  →  transcript_list (timed caption segments)
+   ↓
+Flatten to one string  →  "Imagine you happen across a short movie script..."
+   ↓
+RecursiveCharacterTextSplitter  →  168 Document chunks
+   ↓
+OpenAIEmbeddings  →  vectors
+   ↓
+FAISS.from_documents  →  in-memory vector store
+   ↓
+retriever.invoke("What is deepmind?")  →  4 most similar chunks
+   ↓
+PromptTemplate + ChatOpenAI  →  grounded answer
+```
+
+### Project 1 vs Project 2
+
+| Aspect | Project 1 (PDF) | Project 2 (YouTube) |
+|---|---|---|
+| Data source | PDF file on disk | YouTube captions API |
+| Loader | `PyPDFLoader` | `youtube-transcript-api` |
+| Metadata | `page`, `source` | Plain text only (no timestamps in chunks) |
+| Vector store | Chroma (persisted to disk) | FAISS (in-memory) |
+| Prompt style | `ChatPromptTemplate` | `PromptTemplate` (string template) |
+| Teaching style | One complete script | Notebook: manual steps first, then LCEL chain |
+| Example question | "Explain page 5 like I am a 5-year-old." | "Can you summarize the video?" |
+
+---
+
+### Setup
+
+**Install dependencies** (from the notebook):
+
+```bash
+pip install youtube-transcript-api langchain-community langchain-openai \
+            faiss-cpu tiktoken python-dotenv langchain-text-splitters
+```
+
+**Set API key** — never hardcode keys in source code; use an environment variable:
+
+```python
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+# Requires OPENAI_API_KEY in .env or shell environment
+assert os.getenv("OPENAI_API_KEY"), "Set OPENAI_API_KEY first"
+```
+
+**Imports used in the notebook:**
+
+```python
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_community.vectorstores import FAISS
+from langchain_core.prompts import PromptTemplate
+```
+
+> **Note:** The notebook imports `RecursiveCharacterTextSplitter` from `langchain.text_splitter`. Prefer `langchain_text_splitters` in new code — same class, updated package path.
+
+---
+
+### Step 1a — Indexing: Document ingestion (fetch transcript)
+
+Instead of loading a file, we fetch captions from YouTube using the **video ID** (the part after `v=` in the URL):
+
+```text
+https://www.youtube.com/watch?v=Gfr50f6ZBvo
+                              ↑ video_id
+```
+
+Each caption segment is a dict with `text`, `start` (seconds), and `duration`:
+
+```python
+{'text': 'Imagine you happen across a short movie script that',
+ 'start': 1.14,
+ 'duration': 2.836}
+```
+
+**Fetch and flatten the transcript:**
+
+```python
+video_id = "Gfr50f6ZBvo"
+
+try:
+    ytt_api = YouTubeTranscriptApi()
+    fetched = ytt_api.fetch(video_id, languages=["en"])
+    transcript_list = fetched.to_raw_data()
+
+    # Join all caption segments into one plain-text string
+    transcript = " ".join(chunk["text"] for chunk in transcript_list)
+    print(transcript[:500], "...")
+
+except TranscriptsDisabled:
+    print("No captions available for this video.")
+```
+
+**What this step does:**
+
+1. Calls YouTube's caption endpoint (no YouTube API key needed).
+2. Requests English captions (`languages=["en"]`).
+3. Converts timed segments into one continuous string for chunking.
+
+**Inspect raw segments** (optional — notebook cell 6):
+
+```python
+transcript_list[:3]
+# [{'text': 'Imagine you happen across...', 'start': 1.14, 'duration': 2.836}, ...]
+```
+
+#### API migration note
+
+The notebook originally used the **old static API**:
+
+```python
+# Old (removed in youtube-transcript-api v1.2.0)
+transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=["en"])
+```
+
+If you see `AttributeError: ... has no attribute 'get_transcript'`, use the **new instance API** shown above:
+
+```python
+ytt_api = YouTubeTranscriptApi()
+transcript_list = ytt_api.fetch(video_id, languages=["en"]).to_raw_data()
+```
+
+---
+
+### Step 1b — Indexing: Text splitting
+
+The full transcript is too long for a single embedding. Split it into overlapping chunks.
+
+```python
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=200,
+)
+
+# create_documents() wraps a raw string in Document objects
+chunks = splitter.create_documents([transcript])
+
+print(len(chunks))   # ~168 for this video
+print(chunks[0].page_content[:200])
+```
+
+**Why these settings?**
+
+| Parameter | Value | Reason |
+|---|---|---|
+| `chunk_size` | 1000 | Fits embedding model limits; small enough for precise retrieval |
+| `chunk_overlap` | 200 | Keeps context across chunk boundaries (20% overlap) |
+
+**Difference from Project 1:** The PDF app uses `split_documents(pages)` on loader output (keeps `page` metadata). Here `create_documents([transcript])` starts from a single string — chunks have no timestamp metadata unless you add it yourself.
+
+**Optional improvement — preserve timestamps:**
+
+```python
+from langchain_core.documents import Document
+
+docs = [
+    Document(
+        page_content=chunk["text"],
+        metadata={"start": chunk["start"], "video_id": video_id},
+    )
+    for chunk in transcript_list
+]
+chunks = splitter.split_documents(docs)  # metadata carries into chunks
+```
+
+---
+
+### Step 1c & 1d — Indexing: Embeddings + FAISS vector store
+
+Convert each chunk to a vector and store in **FAISS** (Facebook AI Similarity Search).
+
+```python
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
+vector_store = FAISS.from_documents(chunks, embeddings)
+```
+
+**What happens internally:**
+
+```text
+For each of 168 chunks:
+  chunk text  →  OpenAIEmbeddings  →  1536-dim vector  →  stored in FAISS index
+```
+
+**FAISS vs Chroma (Project 1):**
+
+| | FAISS | Chroma |
+|---|---|---|
+| Persistence | In-memory by default (lost on restart) | Saves to `./chroma_db` |
+| Best for | Notebooks, quick experiments | Apps that re-use the same index |
+| Speed | Very fast similarity search | Fast; adds metadata filtering |
+
+**Inspect the vector store** (exploratory cells from the notebook):
+
+```python
+# Map FAISS index positions to document IDs
+vector_store.index_to_docstore_id
+# {0: 'uuid-1', 1: 'uuid-2', ...}
+
+# Fetch a document by its ID
+vector_store.get_by_ids(["2436bdb8-3f5f-49c6-8915-0c654c888700"])
+```
+
+**Save FAISS to disk** (so you don't re-embed every run):
+
+```python
+vector_store.save_local("faiss_youtube_index")
+
+# Load later
+vector_store = FAISS.load_local(
+    "faiss_youtube_index",
+    embeddings,
+    allow_dangerous_deserialization=True,
+)
+```
+
+---
+
+### Step 2 — Retrieval
+
+Create a retriever from the vector store. The retriever embeds the user question and returns the **top-k most similar chunks**.
+
+```python
+retriever = vector_store.as_retriever(
+    search_type="similarity",
+    search_kwargs={"k": 4},
+)
+
+# Test retrieval
+docs = retriever.invoke("What is deepmind")
+for i, doc in enumerate(docs, 1):
+    print(f"[{i}] {doc.page_content[:120]}...")
+```
+
+**Example queries from the notebook:**
+
+| Question | What retrieval should find |
+|---|---|
+| `"What is deepmind"` | Chunks mentioning DeepMind (if present in transcript) |
+| `"who is Demis"` | Chunks about Demis Hassabis |
+| `"is the topic of nuclear fusion discussed..."` | Chunks about nuclear fusion, or nothing if not in video |
+
+The 3Blue1Brown video (`Gfr50f6ZBvo`) covers LLMs, transformers, and attention — **not** DeepMind or nuclear fusion. For those questions a well-grounded model should say *"I don't know from the transcript"* after retrieval returns weak or irrelevant chunks.
+
+---
+
+### Step 3 — Augmentation (manual walkthrough)
+
+Before building the chain, the notebook walks through augmentation **step by step** so you can see each piece.
+
+**3.1 — Create the LLM:**
+
+```python
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+```
+
+Low temperature (0.2) keeps answers factual — good for transcript Q&A.
+
+**3.2 — Create the prompt template:**
+
+```python
+prompt = PromptTemplate(
+    template="""
+      You are a helpful assistant.
+      Answer ONLY from the provided transcript context.
+      If the context is insufficient, just say you don't know.
+
+      {context}
+      Question: {question}
+    """,
+    input_variables=["context", "question"],
+)
+```
+
+**3.3 — Retrieve documents for a specific question:**
+
+```python
+question = (
+    "is the topic of nuclear fusion discussed in this video? "
+    "if yes then what was discussed"
+)
+retrieved_docs = retriever.invoke(question)
+```
+
+**3.4 — Format retrieved chunks into one context string:**
+
+```python
+context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
+print(context_text[:500])
+```
+
+**3.5 — Fill the prompt template:**
+
+```python
+final_prompt = prompt.invoke({"context": context_text, "question": question})
+print(final_prompt.to_string())
+```
+
+At this point you have a complete prompt ready to send to the LLM — context and question are both filled in.
+
+---
+
+### Step 4 — Generation
+
+Pass the filled prompt to the LLM and read the response:
+
+```python
+answer = llm.invoke(final_prompt)
+print(answer.content)
+```
+
+**Expected behavior for the nuclear fusion question** on this video:
+
+Since the 3Blue1Brown LLM video does not discuss nuclear fusion, a grounded answer should be:
+
+> *"I don't know"* or *"The transcript does not mention nuclear fusion."*
+
+This is correct RAG behavior — the model refuses instead of hallucinating.
+
+---
+
+### Building the LCEL chain
+
+After understanding each step manually, the notebook combines everything into one **LCEL chain** — the same pattern as Project 1.
+
+**5.1 — Helper to format retrieved docs:**
+
+```python
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
+from langchain_core.output_parsers import StrOutputParser
+
+def format_docs(retrieved_docs):
+    return "\n\n".join(doc.page_content for doc in retrieved_docs)
+```
+
+**5.2 — Parallel chain** (fetch context + pass question at the same time):
+
+```python
+parallel_chain = RunnableParallel({
+    "context": retriever | RunnableLambda(format_docs),
+    "question": RunnablePassthrough(),
+})
+
+# Test: see what the parallel chain produces
+parallel_chain.invoke("who is Demis")
+# {'context': '...retrieved transcript text...', 'question': 'who is Demis'}
+```
+
+**5.3 — Full chain** (parallel → prompt → LLM → parser):
+
+```python
+parser = StrOutputParser()
+
+main_chain = parallel_chain | prompt | llm | parser
+
+answer = main_chain.invoke("Can you summarize the video")
+print(answer)
+```
+
+**Flow on `invoke("Can you summarize the video")`:**
+
+```text
+1. Question enters parallel_chain
+2. Retriever finds top-4 transcript chunks about LLMs, transformers, training, etc.
+3. format_docs() joins chunks into context string
+4. Question passes through unchanged
+5. PromptTemplate fills {context} and {question}
+6. GPT-4o-mini generates a summary using only those chunks
+7. StrOutputParser returns plain text
+```
+
+---
+
+### Complete script: YouTube Transcript RAG
+
+Consolidated version of the entire notebook — save as `youtube-chatbot/youtube_rag.py`:
+
+```python
+"""
+YouTube Transcript RAG — answers questions about a video using its captions.
+
+Based on: youtube-chatbot/rag_using_langchain.ipynb
+Video: 3Blue1Brown "But what is a GPT?" (Gfr50f6ZBvo)
+"""
+
+import os
+from dotenv import load_dotenv
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_community.vectorstores import FAISS
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
+from langchain_core.output_parsers import StrOutputParser
+
+
+# --- Config ---
+VIDEO_ID = "Gfr50f6ZBvo"
+FAISS_DIR = "faiss_youtube_index"
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 200
+TOP_K = 4
+
+
+def fetch_transcript(video_id: str) -> str:
+    """Step 1a: Fetch YouTube captions and return plain text."""
+    try:
+        ytt_api = YouTubeTranscriptApi()
+        fetched = ytt_api.fetch(video_id, languages=["en"])
+        segments = fetched.to_raw_data()
+        return " ".join(seg["text"] for seg in segments)
+    except TranscriptsDisabled:
+        raise ValueError(f"No captions available for video {video_id}")
+
+
+def build_vectorstore(video_id: str, force_reindex: bool = False):
+    """Steps 1b–1d: Split, embed, and store in FAISS."""
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
+    if not force_reindex and os.path.exists(FAISS_DIR):
+        print("Loading existing FAISS index...")
+        return FAISS.load_local(
+            FAISS_DIR, embeddings, allow_dangerous_deserialization=True
+        )
+
+    print(f"Fetching transcript for {video_id}...")
+    transcript = fetch_transcript(video_id)
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+    )
+    chunks = splitter.create_documents([transcript])
+    print(f"  Created {len(chunks)} chunks")
+
+    vector_store = FAISS.from_documents(chunks, embeddings)
+    vector_store.save_local(FAISS_DIR)
+    print(f"  FAISS index saved to {FAISS_DIR}/")
+    return vector_store
+
+
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+
+def build_rag_chain(vector_store):
+    """Steps 2–4 + LCEL chain."""
+    retriever = vector_store.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": TOP_K},
+    )
+
+    prompt = PromptTemplate(
+        template="""
+You are a helpful assistant.
+Answer ONLY from the provided transcript context.
+If the context is insufficient, just say you don't know.
+
+{context}
+Question: {question}
+""",
+        input_variables=["context", "question"],
+    )
+
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+
+    chain = (
+        RunnableParallel({
+            "context": retriever | RunnableLambda(format_docs),
+            "question": RunnablePassthrough(),
+        })
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+    return chain, retriever
+
+
+def main():
+    load_dotenv()
+    if not os.getenv("OPENAI_API_KEY"):
+        raise EnvironmentError("Set OPENAI_API_KEY in .env or environment.")
+
+    vector_store = build_vectorstore(VIDEO_ID, force_reindex=False)
+    rag_chain, retriever = build_rag_chain(vector_store)
+
+    # Example questions from the notebook
+    questions = [
+        "What is deepmind",
+        "who is Demis",
+        "is the topic of nuclear fusion discussed in this video? if yes then what was discussed",
+        "Can you summarize the video",
+    ]
+
+    for question in questions:
+        print(f"\nQuestion: {question}")
+        print("-" * 60)
+
+        # Show retrieved context (debugging)
+        retrieved = retriever.invoke(question)
+        print(f"Retrieved {len(retrieved)} chunks")
+        for i, doc in enumerate(retrieved, 1):
+            print(f"  [{i}] {doc.page_content[:100]}...")
+
+        answer = rag_chain.invoke(question)
+        print(f"\nAnswer: {answer}")
+        print("-" * 60)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+**Run it:**
+
+```bash
+cd LangChain/youtube-chatbot
+pip install youtube-transcript-api langchain-community langchain-openai \
+            faiss-cpu tiktoken python-dotenv langchain-text-splitters
+export OPENAI_API_KEY="your-key-here"
+python youtube_rag.py
+```
+
+---
+
+### Notebook cell map
+
+Quick reference — which notebook cell maps to which RAG stage:
+
+| Notebook section | Cells | RAG stage | Key code |
+|---|---|---|---|
+| Install libraries | 1–3 | Setup | `pip install ...`, imports |
+| Step 1a — Document ingestion | 4–6 | Indexing | `YouTubeTranscriptApi().fetch()` |
+| Step 1b — Text splitting | 7–10 | Indexing | `RecursiveCharacterTextSplitter` |
+| Step 1c & 1d — Embeddings + store | 11–14 | Indexing | `FAISS.from_documents()` |
+| Step 2 — Retrieval | 15–18 | Retrieval | `as_retriever(k=4)` |
+| Step 3 — Augmentation | 19–26 | Augmentation | `PromptTemplate`, manual context |
+| Step 4 — Generation | 27–28 | Generation | `llm.invoke(final_prompt)` |
+| Building a Chain | 29–36 | All stages | `RunnableParallel` + LCEL pipe |
+
+---
+
+### Troubleshooting (Project 2)
+
+| Problem | Cause | Fix |
+|---|---|---|
+| `get_transcript` AttributeError | Old `youtube-transcript-api` API | Use `YouTubeTranscriptApi().fetch(id).to_raw_data()` |
+| `TranscriptsDisabled` | Video has no captions | Pick a video with subtitles enabled |
+| Wrong or empty answers | Weak retrieval (`k` too low) | Increase `k`, improve chunk size, add metadata |
+| Answers about topics not in video | Model hallucinating | Strengthen prompt: "say you don't know" |
+| Re-indexing every run | FAISS in-memory only | Call `save_local()` / `load_local()` |
+| Hardcoded API key in notebook | Security risk | Use `.env` + `load_dotenv()` instead |
+
+---
+
 ## RAG improvements
 
 Once the basic pipeline works, improve quality at each stage.
@@ -814,4 +1424,9 @@ Minimal chain:
   | prompt | llm | StrOutputParser()
 ```
 
-Start with the complete PDF example above. Add MMR, multi-query, or compression only when you hit a real quality or performance problem.
+| Project | Index pipeline | Query example |
+|---|---|---|
+| PDF Q&A | `PyPDFLoader` → Chroma | "Explain page 5 like I am a 5-year-old." |
+| YouTube chatbot | `YouTubeTranscriptApi` → FAISS | "Can you summarize the video" |
+
+Start with Project 1 or Project 2. Add MMR, multi-query, or compression only when you hit a real quality or performance problem.

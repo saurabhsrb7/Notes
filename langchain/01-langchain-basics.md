@@ -1,4 +1,4 @@
-> [↑ Index](../README.md) | [LangChain Components →](02-langchain-components.md)
+> [LangChain Components →](02-langchain-components.md)
 
 # LangChain Basics
 

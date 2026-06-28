@@ -1,4 +1,4 @@
-> [← Document Loaders](10-document-loaders.md) | [↑ Index](../README.md) | [Vector Stores →](12-vector-stores.md)
+> [← Document Loaders](10-document-loaders.md) | [Vector Stores →](12-vector-stores.md)
 
 # Text Splitters
 

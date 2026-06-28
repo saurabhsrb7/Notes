@@ -1,4 +1,4 @@
-> [← Runnables and LCEL](08-runnables-and-lcel.md) | [↑ Index](../README.md) | [Document Loaders →](10-document-loaders.md)
+> [← Runnables and LCEL](08-runnables-and-lcel.md) | [Document Loaders →](10-document-loaders.md)
 
 # RAG: Retrieval-Augmented Generation
 

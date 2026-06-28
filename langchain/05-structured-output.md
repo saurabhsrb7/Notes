@@ -1,4 +1,4 @@
-> [← Prompts](04-prompts.md) | [↑ Index](../README.md) | [Output Parsers →](06-output-parsers.md)
+> [← Prompts](04-prompts.md) | [Output Parsers →](06-output-parsers.md)
 
 # Structured Output
 

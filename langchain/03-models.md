@@ -1,4 +1,4 @@
-> [← LangChain Components](02-langchain-components.md) | [↑ Index](../README.md) | [Prompts →](04-prompts.md)
+> [← LangChain Components](02-langchain-components.md) | [Prompts →](04-prompts.md)
 
 # Models
 

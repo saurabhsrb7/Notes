@@ -144,15 +144,85 @@ def multiply(a: int, b: int) -> int:
 
 ### 2. StructuredTool + Pydantic
 
-Use this when the tool input needs a structured schema.
+Use `StructuredTool` when:
+- The tool needs multiple inputs.
+- You want to define a strict validation schema for inputs using Pydantic.
+- You want to specify parameter names, types, and descriptions explicitly so the LLM knows exactly what values to generate.
 
-Good for tools with multiple arguments or validation.
+#### Example:
+
+```python
+from pydantic import BaseModel, Field
+from langchain_core.tools import StructuredTool
+
+# 1. Define the input schema using Pydantic
+class MultiplyInput(BaseModel):
+    a: int = Field(description="First number to multiply")
+    b: int = Field(description="Second number to multiply")
+
+# 2. Define the Python function containing the logic
+def multiply(a: int, b: int) -> int:
+    return a * b
+
+# 3. Create the StructuredTool from the function and schema
+multiply_tool = StructuredTool.from_function(
+    func=multiply,
+    name="multiply",
+    description="Multiply two numbers together.",
+    args_schema=MultiplyInput
+)
+
+# 4. Invoke the tool
+result = multiply_tool.invoke({"a": 8, "b": 7})
+print(result)  # Output: 56
+```
 
 ### 3. BaseTool class
 
-`BaseTool` is the abstract base class for tools.
+Subclass `BaseTool` when:
+- You need absolute control over the tool's behavior, setup, state, or initialization.
+- You need to manage internal state or pass complex configuration objects (e.g. API clients, database connections) during initialization.
+- You want to implement both synchronous (`_run`) and asynchronous (`_arun`) executions.
 
-Use it when you need full customization.
+When subclassing `BaseTool`, you must:
+1. Define the `name` and `description` attributes.
+2. Define the `args_schema` attribute referencing a Pydantic model.
+3. Implement the `_run` method for synchronous execution.
+4. Implement the `_arun` method for asynchronous execution (or raise `NotImplementedError` if async is not supported).
+
+#### Example:
+
+```python
+from typing import Type
+from pydantic import BaseModel, Field
+from langchain_core.tools import BaseTool
+
+# 1. Define the input schema using Pydantic
+class MultiplyInput(BaseModel):
+    a: int = Field(description="First number to multiply")
+    b: int = Field(description="Second number to multiply")
+
+# 2. Define the custom tool class inheriting from BaseTool
+class MultiplyTool(BaseTool):
+    name: str = "multiply"
+    description: str = "Multiply two numbers together."
+    args_schema: Type[BaseModel] = MultiplyInput
+
+    def _run(self, a: int, b: int) -> int:
+        """Synchronous execution logic."""
+        return a * b
+
+    async def _arun(self, a: int, b: int) -> int:
+        """Asynchronous execution logic."""
+        return self._run(a, b)
+
+# 3. Instantiate the tool
+multiply_tool = MultiplyTool()
+
+# 4. Invoke the tool
+result = multiply_tool.invoke({"a": 8, "b": 7})
+print(result)  # Output: 56
+```
 
 ## Toolkits
 

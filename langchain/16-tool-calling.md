@@ -40,9 +40,8 @@ LLM + tool descriptions + input schemas -> tool-aware LLM
 
 Tool calling is when the LLM decides it needs a tool and returns a tool call request.
 
-Important:
-
-> The LLM does not actually run the tool. It only suggests the tool name and arguments.
+> [!IMPORTANT]
+> **The LLM does NOT execute the tool.** The LLM only decides *which* tool to use and generates the arguments for it. The actual execution of the code/API must be done manually by your client-side application.
 
 Example user question:
 
@@ -119,3 +118,75 @@ LLM final answer: 10 USD is 853.415 INR at the current rate.
 Important design point:
 
 > Do not ask the LLM to fill arguments that should come from the runtime. Let your system inject those values after previous tool calls.
+
+---
+
+## End-to-End Code Example
+
+Here is a complete, working example of tool calling showing binding, calling, execution, and returning the final answer back to the LLM.
+
+```python
+from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
+
+# ---------------------------------------------------------------------
+# Step 1: Define the Tool
+# ---------------------------------------------------------------------
+@tool
+def multiply(a: int, b: int) -> int:
+    """Multiply two numbers together."""
+    return a * b
+
+# Map tool names to the actual functions for dynamic lookup/execution
+tools_map = {"multiply": multiply}
+
+# ---------------------------------------------------------------------
+# Step 2: Tool Binding
+# ---------------------------------------------------------------------
+# Bind the tool to the LLM to make it tool-aware
+llm = ChatOpenAI(model="gpt-4o", temperature=0)
+llm_with_tools = llm.bind_tools([multiply])
+
+# ---------------------------------------------------------------------
+# Step 3: Tool Calling (LLM Decides and Requests)
+# ---------------------------------------------------------------------
+messages = [HumanMessage(content="What is 8 multiplied by 7?")]
+ai_message = llm_with_tools.invoke(messages)
+
+print("LLM Response (Tool Call Request):")
+print(ai_message.tool_calls)
+# Output: [{'name': 'multiply', 'args': {'a': 8, 'b': 7}, 'id': 'call_123xyz'}]
+
+# Append the LLM's response (containing tool call requests) to conversation history
+messages.append(ai_message)
+
+# ---------------------------------------------------------------------
+# Step 4: Tool Execution (Runtime executes the function)
+# ---------------------------------------------------------------------
+for tool_call in ai_message.tool_calls:
+    # 1. Fetch the tool by name from the map
+    selected_tool = tools_map[tool_call["name"]]
+    
+    # 2. Invoke the tool with the LLM-provided arguments
+    tool_output = selected_tool.invoke(tool_call["args"])
+    
+    # 3. Create a ToolMessage with the result and the matching tool_call_id
+    tool_message = ToolMessage(
+        content=str(tool_output),
+        tool_call_id=tool_call["id"]
+    )
+    
+    # 4. Append the tool output to conversation history
+    messages.append(tool_message)
+
+# ---------------------------------------------------------------------
+# Step 5: Final Response Generation (LLM formulates final response)
+# ---------------------------------------------------------------------
+# Pass the original question, LLM's tool call request, and tool output back to the LLM
+final_response = llm_with_tools.invoke(messages)
+
+print("\nFinal LLM Response:")
+print(final_response.content)
+# Output: "8 multiplied by 7 is 56."
+```
